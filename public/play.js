@@ -10,6 +10,7 @@ let lastPhaseKey = '';
 
 const loadSession = () => { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; } };
 const saveSession = (s) => { try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch {} };
+const buzz = (pattern) => navigator.vibrate && navigator.vibrate(pattern);
 
 // ---------------- connection ----------------
 
@@ -33,7 +34,11 @@ socket.on('player:state', (s) => {
   if (key !== lastPhaseKey) {
     error = '';
     lastPhaseKey = key;
-    if (navigator.vibrate && (s.phase === 'write' || s.phase === 'hunt')) navigator.vibrate(120);
+    if (s.phase === 'write' || s.phase === 'hunt') buzz(120);
+    if (s.phase === 'scores' && s.myRound) {
+      if (s.myRound.mine && s.myRound.mine.caughtBy.length) buzz([60, 60, 60, 60, 200]);
+      else if (s.myRound.delta > 0) buzz([40, 40, 40]);
+    }
   }
   render();
 });
@@ -80,23 +85,32 @@ function renderJoin(msg = '') {
 function bar() {
   return `
     <div class="bar">
-      <span><b>${state.me.vip ? '♛ ' : ''}${esc(state.me.name)}</b></span>
+      <span class="who">${avatarSvg(state.me.avatar)}<b>${state.me.vip ? '♛ ' : ''}${esc(state.me.name)}</b></span>
       <span class="pts">${state.me.score}</span>
     </div>`;
 }
 
-const timer = () => '<div class="timer" data-timer></div>';
+const timer = () => '<div class="fuse"><div class="fuse-bar" data-fuse><span class="spark"></span></div></div><div class="timer" data-timer></div>';
 
 function roster(showDone) {
   return `<div class="roster">${state.players.map((p) => `
-    <span class="chip ${p.connected ? '' : 'off'} ${showDone && p.done ? 'done' : ''}">${p.vip ? '♛ ' : ''}${esc(p.name)}</span>`).join('')}</div>`;
+    <span class="chip ${p.connected ? '' : 'off'} ${showDone && p.done ? 'done' : ''}">${avatarSvg(p.avatar)}${p.vip ? '♛ ' : ''}${esc(p.name)}</span>`).join('')}</div>`;
 }
 
 function lobbyScreen() {
+  const me = state.me.avatar;
+  const taken = new Set(state.players.filter((p) => p.name !== state.me.name).map((p) => p.avatar.color));
   return `${bar()}
     <div class="panel center">
-      <h2>You're in!</h2>
-      <p class="muted" style="margin:0">Watch the TV for the rules. You'll get your secret word when the game starts.</p>
+      <div class="me-avatar">${avatarSvg(me)}</div>
+      <h2>Pick your disguise</h2>
+      <div class="swatches">${AVATAR_COLORS.map((c, i) => `
+        <button class="swatch ${i === me.color ? 'on' : ''}" style="--c:${c}" data-color="${i}" ${taken.has(i) ? 'disabled' : ''} aria-label="Color ${i + 1}"></button>`).join('')}
+      </div>
+      <div class="disguises">${DISGUISES.map((d, i) => `
+        <button class="dz ${i === me.disguise ? 'on' : ''}" data-disguise="${i}">${avatarSvg({ color: me.color, disguise: i })}<span>${d}</span></button>`).join('')}
+      </div>
+      <div class="err">${esc(error)}</div>
     </div>
     <div class="panel">${roster(false)}</div>
     ${state.me.vip
@@ -137,35 +151,39 @@ function writeScreen() {
         <span class="muted">Hard word? Swap it once per game.</span>
         <button class="ghost" data-act="reroll" ${state.me.rerolls > 0 ? '' : 'disabled'}>Swap (${state.me.rerolls})</button>
       </div>
-      <p class="muted" style="margin:0;font-size:.9rem">Tip: sprinkle in other odd words as decoys. Min ${min} characters.</p>
+      <p class="muted" style="margin:0;font-size:.9rem">Tip: sprinkle in other odd words as decoys. If 2+ players fall for one, you get +${state.points.decoy}. Min ${min} characters.</p>
     </div>`;
 }
 
 function huntScreen() {
   const guesses = state.myGuesses;
   const others = state.answers.filter((a) => a.slot !== state.mine?.slot);
-  const done = others.filter((a) => guesses[a.slot] !== undefined).length;
+  const picked = others.filter((a) => guesses[a.slot] !== undefined).length;
+  const allDone = picked === others.length && state.myHeart;
   const cards = state.answers.map((a) => {
     if (a.slot === state.mine?.slot) {
       return `<div class="paper mine"><span class="slot">${a.slot}</span>${a.tokens.map((t) => esc(t.t)).join('')}<div class="hint">Your answer</div></div>`;
     }
     const sel = guesses[a.slot];
+    const loved = state.myHeart === a.slot;
     const body = a.tokens.map((t, i) => (t.w
       ? `<span class="w ${sel === i ? 'sel' : ''}" data-slot="${a.slot}" data-idx="${i}">${esc(t.t)}</span>`
       : esc(t.t))).join('');
-    return `<div class="paper"><span class="slot">${a.slot}</span>${body}${sel === undefined ? '<div class="hint">Tap the smuggled word</div>' : ''}</div>`;
+    return `<div class="paper"><span class="slot">${a.slot}</span>
+      <button class="heart ${loved ? 'on' : ''}" data-heart="${a.slot}" aria-label="Favorite">${loved ? '❤️' : '🤍'}</button>
+      ${body}${sel === undefined ? '<div class="hint">Tap the smuggled word</div>' : ''}</div>`;
   }).join('');
   return `${bar()}${timer()}
-    <div class="row2"><h2>Inspection</h2><span class="${done === others.length ? 'ok' : 'muted'}">${done}/${others.length} marked</span></div>
+    <div class="row2"><h2>Inspection</h2><span class="${allDone ? 'ok' : 'muted'}">${picked}/${others.length} marked · ${state.myHeart ? '❤️' : '🤍'}</span></div>
     <div class="err">${esc(error)}</div>
     <div class="hunt-list">${cards}</div>
-    <p class="center muted">You can change a pick until time runs out.</p>`;
+    <p class="center muted">${state.myHeart ? 'You can change picks until time runs out.' : 'Tap 🤍 on your favorite answer. Funniest one wins +' + state.points.favorite + '.'}</p>`;
 }
 
 function revealScreen() {
   return `${bar()}
     <div class="panel center">
-      <h1>👀</h1>
+      <div class="me-avatar">${avatarSvg(state.me.avatar)}</div>
       <h2>Eyes on the TV</h2>
       <p class="muted" style="margin:0">The smugglers are being unmasked…</p>
     </div>
@@ -175,6 +193,7 @@ function revealScreen() {
 function scoresScreen() {
   const r = state.myRound;
   const last = state.round >= state.totalRounds;
+  const p = state.points;
   let summary = '';
   if (r) {
     const items = [];
@@ -182,12 +201,15 @@ function scoresScreen() {
       items.push(r.mine.caughtBy.length
         ? `<div class="item bad">Your word was caught by ${r.mine.caughtBy.map(esc).join(', ')}${r.mine.fooled ? `, but it slipped past ${r.mine.fooled}` : ''}.</div>`
         : `<div class="item good">Nobody caught your word! It slipped past ${r.mine.fooled}.</div>`);
+      if (r.mine.decoy) items.push(`<div class="item good">🎭 Your decoy “${esc(r.mine.decoy.word)}” fooled ${r.mine.decoy.count} (+${p.decoy})</div>`);
+      if (r.mine.favorite) items.push(`<div class="item good">❤️ Crowd favorite with ${r.mine.hearts} hearts (+${p.favorite})</div>`);
+      else if (r.mine.hearts) items.push(`<div class="item">❤️ Your answer got ${r.mine.hearts} ${r.mine.hearts === 1 ? 'heart' : 'hearts'}</div>`);
     }
     r.caught.forEach((c) => items.push(`<div class="item good">You caught ${esc(c.author)}'s <span class="tag">${esc(c.word)}</span></div>`));
     r.missed.forEach((c) => items.push(`<div class="item bad">${esc(c.author)} slipped <span class="tag">${esc(c.word)}</span> past you${c.guessed ? '' : ' (no pick)'}</div>`));
     summary = `<div class="panel"><h2>This round: <span class="amber">+${r.delta}</span></h2>${items.join('')}</div>`;
   }
-  const rank = state.leaderboard.findIndex((p) => p.name === state.me.name) + 1;
+  const rank = state.leaderboard.findIndex((x) => x.name === state.me.name) + 1;
   return `${bar()}
     <div class="panel center"><h2>You're #${rank} of ${state.leaderboard.length}</h2></div>
     ${summary}
@@ -201,9 +223,10 @@ function endScreen() {
   const award = (a, title) => (a && a.names.includes(state.me.name) ? `<div class="item good">You won <b>${title}</b>!</div>` : '');
   return `${bar()}
     <div class="panel center">
+      <div class="me-avatar">${avatarSvg(state.me.avatar, { mood: rank === 1 ? 'smug' : undefined })}</div>
       <h1>${rank === 1 ? 'You win! 🏆' : `#${rank}`}</h1>
       <p class="muted" style="margin:0">${state.me.score} points</p>
-      ${award(state.awards.smuggler, '🕶️ Master Smuggler')}${award(state.awards.bloodhound, '🐕 Bloodhound')}
+      ${award(state.awards.smuggler, '🕶️ Master Smuggler')}${award(state.awards.bloodhound, '🐕 Bloodhound')}${award(state.awards.favorite, '❤️ Crowd Favorite')}
     </div>
     ${state.me.vip ? '<button class="primary big" data-act="playAgain">Play again</button>' : '<p class="center muted">Waiting for the ♛ VIP…</p>'}`;
 }
@@ -245,14 +268,18 @@ function render() {
       act({ type: 'answer', text: newTa.value });
     });
   }
-  if (state.phase === 'hunt') window.scrollTo(0, scrollY);
+  if (state.phase === 'hunt' || state.phase === 'lobby') window.scrollTo(0, scrollY);
 }
 
 app.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-act],[data-slot]');
-  if (!el) return;
-  if (el.dataset.act) act({ type: el.dataset.act });
-  else act({ type: 'guess', slot: el.dataset.slot, idx: Number(el.dataset.idx) });
+  const el = e.target.closest('[data-act],[data-slot],[data-heart],[data-color],[data-disguise]');
+  if (!el || el.disabled) return;
+  const d = el.dataset;
+  if (d.act) act({ type: d.act });
+  else if (d.heart) { buzz(30); act({ type: 'heart', slot: d.heart }); }
+  else if (d.slot) { buzz(15); act({ type: 'guess', slot: d.slot, idx: Number(d.idx) }); }
+  else if (d.color) act({ type: 'avatar', color: Number(d.color), disguise: state.me.avatar.disguise });
+  else if (d.disguise) act({ type: 'avatar', color: state.me.avatar.color, disguise: Number(d.disguise) });
 });
 
 startTimerLoop(clock);

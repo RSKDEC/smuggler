@@ -4,6 +4,10 @@ const clock = makeClock();
 const HOST_KEY = 'smuggler-host';
 let state = null;
 let qr = null;
+let lastHtml = '';
+const seen = new Set();
+let revealTimers = [];
+let animatedScores = '';
 
 const saved = () => { try { return sessionStorage.getItem(HOST_KEY); } catch { return null; } };
 const save = (code) => { try { sessionStorage.setItem(HOST_KEY, code); } catch {} };
@@ -28,8 +32,10 @@ socket.on('connect', () => {
 });
 
 socket.on('host:state', (s) => {
+  const prev = state;
   state = s;
   clock.sync(s);
+  cues(prev, s);
   render();
 });
 
@@ -43,39 +49,107 @@ function newRoom() {
   socket.emit('host:create', null, onRoom);
 }
 
+// Any click on the TV page unlocks audio (browsers require a gesture).
+document.addEventListener('click', () => {
+  if (!sound.ready() && sound.unlock()) setTimeout(() => { syncMusic(); render(); }, 50);
+});
+
 app.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-act]');
   if (!btn) return;
-  if (btn.dataset.act === 'newRoom') newRoom();
-  else act(btn.dataset.act);
+  const a = btn.dataset.act;
+  if (a === 'newRoom') newRoom();
+  else if (a === 'sound') {
+    if (sound.ready()) sound.setEnabled(!sound.enabled);
+    render();
+  } else act(a);
 });
 
-// ---------------- render ----------------
+// ---------------- sound cues ----------------
+
+function syncMusic() {
+  if (!state) return;
+  sound.music(['lobby', 'write', 'hunt', 'scores'].includes(state.phase));
+}
+
+function cues(prev, s) {
+  syncMusic();
+  const fresh = s.players.filter((p) => !seen.has(p.name));
+  if (prev && fresh.length && s.phase === 'lobby') sound.play('pop');
+
+  const doneCount = (st) => st.players.filter((p) => p.done).length;
+  if (prev && prev.phase === s.phase && (s.phase === 'write' || s.phase === 'hunt') && doneCount(s) > doneCount(prev)) {
+    sound.play('blip');
+  }
+  if (!prev || prev.phase !== s.phase) {
+    if (s.phase === 'write' || s.phase === 'hunt') sound.play('whoosh');
+    if (s.phase === 'scores') sound.play('chime');
+    if (s.phase === 'end') sound.play('fanfare');
+  }
+  if (s.phase === 'reveal' && (!prev || prev.phase !== 'reveal' || prev.revealIdx !== s.revealIdx)) {
+    revealCues(s.results[s.revealIdx]);
+  }
+}
+
+// Timings match the CSS animation delays in .xray (see style.css).
+function revealCues(r) {
+  revealTimers.forEach(clearTimeout);
+  const at = (ms, fn) => revealTimers.push(setTimeout(fn, ms));
+  sound.play('scan');
+  Object.values(r.pins).flat().forEach((_, i) => at(1800 + i * 120, () => sound.play('pin')));
+  at(2000, () => sound.play('drumroll', 1.1));
+  at(3600, () => sound.play(r.catchers.length ? 'busted' : 'cleared'));
+}
+
+let lastTick = null;
+setInterval(() => {
+  const s = clock.remaining();
+  if (state && (state.phase === 'write' || state.phase === 'hunt') && s != null && s <= 10 && s > 0 && s !== lastTick) {
+    sound.play('tick');
+  }
+  lastTick = s;
+}, 200);
+
+// ---------------- render helpers ----------------
+
+const avatarOf = (name) => state.players.find((p) => p.name === name)?.avatar;
 
 function header() {
   const phase = {
     lobby: 'Lobby', write: 'Smuggling', hunt: 'Inspection', reveal: 'Busted?', scores: 'Scores', end: 'Final scores',
   }[state.phase];
   const round = state.round && state.phase !== 'lobby' ? ` · Round ${state.round}/${state.totalRounds}` : '';
+  const soundBtn = sound.ready()
+    ? `<button class="ghost soundbtn" data-act="sound">${sound.enabled ? '🔊' : '🔇'}</button>`
+    : '<button class="ghost soundbtn hint" data-act="sound">🔈 Click to enable sound</button>';
+  const fuse = state.deadline ? '<div class="fuse"><div class="fuse-bar" data-fuse><span class="spark"></span></div></div>' : '';
   return `
     <div class="tv-top">
       <div class="logo">Smug<span class="x">g</span>ler</div>
       <div class="info">${phase}${round} · Room <b class="amber">${esc(state.code)}</b></div>
-      <div class="timer" data-timer></div>
-    </div>`;
+      <div class="top-right">${soundBtn}<div class="timer" data-timer></div></div>
+    </div>
+    ${fuse}`;
 }
 
-function people(showDone) {
-  if (!state.players.length) return '<span class="muted">Waiting for players…</span>';
-  return `<div class="people">${state.players.map((p) => `
-    <div class="person ${p.connected ? '' : 'off'} ${showDone && p.done ? 'done' : ''}">
-      ${showDone && p.done ? '<span class="check">✅</span>' : ''}
-      ${p.vip ? '<span class="crown">♛</span> ' : ''}${esc(p.name)}
-    </div>`).join('')}</div>`;
+function suspects({ showDone = false, enter = false, small = false } = {}) {
+  if (!state.players.length) return '<div class="queue-empty muted">Waiting for smugglers to arrive…</div>';
+  const html = state.players.map((p, i) => {
+    const isNew = enter && !seen.has(p.name);
+    const done = showDone && p.done;
+    return `
+      <div class="suspect ${p.connected ? '' : 'off'} ${isNew ? 'enter' : ''} ${showDone && !done ? 'busy' : ''}" style="--i:${i}">
+        ${avatarSvg(p.avatar, { mood: done ? 'smug' : undefined })}
+        ${done ? '<span class="ready-stamp">Ready</span>' : ''}
+        <div class="nametag">${p.vip ? '♛ ' : ''}${esc(p.name)}</div>
+      </div>`;
+  }).join('');
+  return `<div class="queue ${small ? 'small' : ''}">${html}</div>`;
 }
 
 function lobby() {
   const { minPlayers, maxPlayers } = state.limits;
+  const p = state.points;
   return `
     ${header()}
     <div class="lobby">
@@ -85,26 +159,21 @@ function lobby() {
         ${qr ? `<img src="${qr}" alt="QR code to join">` : ''}
         <div class="url muted">${esc(joinUrl(state.code))}</div>
       </div>
-      <div class="roomlist">
-        <h2>Smugglers (${state.players.length}/${maxPlayers})</h2>
-        ${people(false)}
+      <div class="gate">
+        <div class="gate-sign"><span>Customs</span><span class="dot">●</span><span>Arrivals</span><span class="count">${state.players.length}/${maxPlayers}</span></div>
+        ${suspects({ enter: true })}
       </div>
       <div class="howto">
-        <b class="amber">How to play.</b> Everyone answers the same prompt, but each of you gets a secret
-        <span class="tag" style="font-size:1.1vw">contraband</span> word you must sneak into your answer.
-        <ol>
-          <li><b>Smuggle:</b> write an answer that hides your word so naturally nobody notices it.</li>
-          <li><b>Inspect:</b> read everyone's answers and tap the word you think each person smuggled.</li>
-          <li><b>Score:</b> +${state.points.catch} for every word you catch, +${state.points.sneak} for every player your word slips past.</li>
-        </ol>
-        Pro tip: throw in a few weird decoy words so they tap the wrong one. ${minPlayers}–${maxPlayers} players. ♛ = VIP, who starts the game from their phone.
+        <div class="step"><div class="num">1</div><div><b>Smuggle</b><br>Answer the prompt and hide your secret <span class="tag sm">contraband</span> word in it.</div></div>
+        <div class="step"><div class="num">2</div><div><b>Inspect</b><br>Tap the word you think each player smuggled. ❤️ your favorite answer.</div></div>
+        <div class="step"><div class="num">3</div><div><b>Score</b><br>+${p.catch} per catch · +${p.sneak} per player you fool · +${p.decoy} if your decoy fools 2+ · +${p.favorite} crowd favorite</div></div>
       </div>
     </div>
     <div class="tv-actions">
       <button data-act="start" class="primary" ${state.canStart ? 'disabled' : ''}>Start game</button>
       <button data-act="newRoom" class="ghost">New room</button>
     </div>
-    ${state.canStart ? `<p class="sub">${esc(state.canStart)}</p>` : ''}`;
+    <p class="sub">${state.canStart ? esc(state.canStart) : `${minPlayers}–${maxPlayers} players · ♛ VIP can start from their phone`}</p>`;
 }
 
 function writeScreen() {
@@ -112,19 +181,9 @@ function writeScreen() {
   return `
     ${header()}
     <div class="prompt">${esc(state.prompt)}</div>
-    <div class="sub">Check your phone for your secret contraband word and smuggle it into your answer 🤫 · ${done}/${state.players.length} done</div>
-    <div class="roomlist">${people(true)}</div>
+    <div class="sub">Check your phone for your secret contraband 🤫 · <b class="amber">${done}/${state.players.length}</b> smuggled</div>
+    ${suspects({ showDone: true })}
     <div class="tv-actions"><button data-act="skip" class="ghost">Skip timer</button></div>`;
-}
-
-function tokensHtml(tokens, opts = {}) {
-  return tokens.map((tok, i) => {
-    if (!tok.w) return esc(tok.t);
-    if (opts.word && isWord(tok.t, opts.word)) return `<span class="tok-hit">${esc(tok.t)}</span>`;
-    const n = opts.picks && opts.picks[i];
-    if (n) return `<span class="tok-pick">${esc(tok.t)}<sup>${n}</sup></span>`;
-    return esc(tok.t);
-  }).join('');
 }
 
 function huntScreen() {
@@ -132,73 +191,187 @@ function huntScreen() {
   return `
     ${header()}
     <div class="prompt small">${esc(state.prompt)}</div>
-    <div class="answers">${state.answers.map((a) => `
-      <div class="paper"><span class="slot">${a.slot}</span>${tokensHtml(a.tokens)}</div>`).join('')}
+    <div class="answers">${state.answers.map((a, i) => `
+      <div class="paper" style="--i:${i}"><span class="slot">${a.slot}</span>${a.tokens.map((t) => esc(t.t)).join('')}</div>`).join('')}
     </div>
-    <div class="progressline">On your phones: tap the smuggled word in every answer · ${done}/${total} picks in</div>
+    <div class="progressline">On your phones: tap the smuggled word in every answer, then ❤️ your favorite · ${done}/${total}</div>
+    ${suspects({ showDone: true, small: true })}
     <div class="tv-actions"><button data-act="skip" class="ghost">Skip timer</button></div>`;
+}
+
+function revealTokens(r) {
+  let pinNo = 0;
+  return r.tokens.map((tok, i) => {
+    if (!tok.w) return esc(tok.t);
+    const names = r.pins[i] || [];
+    const hit = isWord(tok.t, r.word);
+    const pins = names.map((n) => `<span class="pin" style="--k:${pinNo++}">${avatarSvg(avatarOf(n))}</span>`).join('');
+    const cls = hit ? 'tok hit' : names.length ? 'tok picked' : 'tok';
+    return `<span class="${cls}">${esc(tok.t)}${pins ? `<span class="pins">${pins}</span>` : ''}</span>`;
+  }).join('');
 }
 
 function revealScreen() {
   const r = state.results[state.revealIdx];
-  const nobody = r.catchers.length === 0;
+  const busted = r.catchers.length > 0;
+  const lines = [];
+  if (busted) {
+    lines.push(`🚨 Caught by <b>${r.catchers.map(esc).join(', ')}</b> <span class="pts">+${state.points.catch} each</span>`);
+    if (r.fooled) lines.push(`Slipped past ${r.fooled} <span class="pts">+${r.fooled * state.points.sneak} to ${esc(r.author)}</span>`);
+  } else {
+    lines.push(`🕶️ Nobody caught it! Slipped past <b>${r.fooled}</b> <span class="pts">+${r.fooled * state.points.sneak}</span>`);
+  }
+  if (r.decoy) lines.push(`🎭 Perfect decoy: <b>“${esc(r.decoy.word)}”</b> fooled ${r.decoy.count} <span class="pts">+${state.points.decoy}</span>`);
   return `
     ${header()}
     <div class="prompt small">${esc(state.prompt)}</div>
-    <div class="spotlight">
-      <div class="paper"><span class="slot">${r.slot}</span>${tokensHtml(r.tokens, { word: r.word, picks: r.picks })}</div>
-      <div class="verdict"><span>Smuggled by <b>${esc(r.author)}</b></span><span class="tag">${esc(r.word)}</span></div>
-      <div class="verdict-line">
-        ${nobody
-          ? `🕶️ Nobody caught it! It slipped past <b>${r.fooled}</b> ${r.fooled === 1 ? 'player' : 'players'} (+${r.fooled * state.points.sneak})`
-          : `🚨 Caught by <b>${r.catchers.map(esc).join(', ')}</b> (+${state.points.catch} each)${r.fooled ? ` · slipped past ${r.fooled} (+${r.fooled * state.points.sneak} to ${esc(r.author)})` : ''}`}
+    <div class="spotlight" data-key="${state.round}-${state.revealIdx}">
+      <div class="xray paper">
+        <span class="slot">${r.slot}</span>
+        <div class="xray-text">${revealTokens(r)}</div>
+        <div class="beam"></div>
+        <div class="bigstamp ${busted ? 'busted' : 'cleared'}">${busted ? 'Busted' : 'Cleared'}</div>
       </div>
-      <div class="dots">${state.results.map((_, i) => `<span class="${i <= state.revealIdx ? 'on' : ''}"></span>`).join('')}</div>
+      <div class="culprit">
+        ${avatarSvg(avatarOf(r.author), { mood: busted ? 'busted' : 'smug' })}
+        <div>Smuggled by <b>${esc(r.author)}</b><br><span class="tag">${esc(r.word)}</span></div>
+      </div>
+      <div class="verdicts">${lines.map((l) => `<div class="verdict-line">${l}</div>`).join('')}</div>
+      <div class="dots">${state.results.map((_, i) => `<span class="${i < state.revealIdx ? 'on' : i === state.revealIdx ? 'now' : ''}"></span>`).join('')}</div>
     </div>
     <div class="tv-actions"><button data-act="next" class="primary">Next</button></div>`;
 }
 
-function board(showDelta) {
-  return `<div class="board">${state.leaderboard.map((p, i) => `
-    <div class="row ${i === 0 && p.score > 0 ? 'first' : ''}" style="animation-delay:${i * 60}ms">
+function rowHtml(p, i, { from, showDelta, deltaShown = false }) {
+  return `
+    <div class="row ${i === 0 ? 'first' : ''}" data-name="${esc(p.name)}" style="--i:${i}">
       <span class="rank">${i + 1}</span>
-      <span>${esc(p.name)}</span>
-      <span class="delta">${showDelta && p.delta ? `+${p.delta}` : ''}</span>
-      <span class="pts">${p.score}</span>
-    </div>`).join('')}</div>`;
+      ${avatarSvg(p.avatar)}
+      <span class="nm">${esc(p.name)}</span>
+      <span class="delta ${deltaShown ? 'show' : ''}">${showDelta && p.delta ? `+${p.delta}` : ''}</span>
+      <span class="pts" data-from="${from}" data-to="${p.score}">${from}</span>
+    </div>`;
 }
 
 function scoresScreen() {
   const last = state.round >= state.totalRounds;
+  const key = `scores:${state.round}`;
+  const done = animatedScores === key;
+  // Before the animation, show last round's order and totals; it then slides into the new order.
+  const rows = done
+    ? state.leaderboard
+    : state.leaderboard.slice().sort((a, b) => (b.score - b.delta) - (a.score - a.delta));
+  const fav = (state.favorites || []).map((f) => `
+    <div class="favorite">
+      <div class="fav-head">❤️ Crowd favorite <span class="pts">+${state.points.favorite}</span></div>
+      <div class="paper">${esc(f.text)}</div>
+      <div class="fav-by">${avatarSvg(avatarOf(f.author), { mood: 'smug' })}<b>${esc(f.author)}</b> · ${f.hearts} ❤️</div>
+    </div>`).join('');
   return `
     ${header()}
-    ${board(true)}
+    <div class="scores-wrap">
+      ${fav ? `<div class="favs">${fav}</div>` : ''}
+      <div class="board" data-key="${key}">${rows.map((p, i) => rowHtml(p, i, { from: done ? p.score : p.score - p.delta, showDelta: true, deltaShown: done })).join('')}</div>
+    </div>
     <div class="tv-actions"><button data-act="next" class="primary">${last ? 'Final results' : 'Next round'}</button></div>`;
+}
+
+// FLIP: slide rows from last round's order into the new one while totals count up.
+function animateScores() {
+  const board = app.querySelector('.board');
+  if (!board || animatedScores === board.dataset.key) return;
+  const key = board.dataset.key;
+  setTimeout(() => {
+    if (app.querySelector('.board') !== board) return;
+    animatedScores = key;
+    const rows = [...board.children];
+    const before = new Map(rows.map((r) => [r.dataset.name, r.getBoundingClientRect().top]));
+    state.leaderboard.forEach((p) => {
+      const r = rows.find((x) => x.dataset.name === p.name);
+      if (r) board.appendChild(r);
+    });
+    [...board.children].forEach((r, i) => {
+      r.querySelector('.rank').textContent = i + 1;
+      r.classList.toggle('first', i === 0);
+      r.style.transition = 'none';
+      r.style.transform = `translateY(${before.get(r.dataset.name) - r.getBoundingClientRect().top}px)`;
+      r.querySelector('.delta').classList.add('show');
+    });
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      [...board.children].forEach((r) => {
+        r.style.transition = 'transform 1s cubic-bezier(.2,.8,.2,1)';
+        r.style.transform = '';
+      });
+    }));
+    board.querySelectorAll('.pts').forEach((el) => {
+      const from = Number(el.dataset.from);
+      const to = Number(el.dataset.to);
+      const t0 = performance.now();
+      const step = (t) => {
+        const k = Math.min(1, (t - t0) / 1100);
+        el.textContent = Math.round(from + (to - from) * (1 - (1 - k) ** 3));
+        if (k < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+    sound.play('drumroll', 0.9);
+    setTimeout(() => sound.play('chime'), 1000);
+    // Keep the cached markup in sync so the next state update re-renders in final order.
+    lastHtml = '';
+  }, state.favorites ? 2600 : 900);
+}
+
+function confetti() {
+  return `<div class="confetti">${Array.from({ length: 40 }, (_, i) => `<i style="--x:${Math.random() * 100}vw;--d:${(Math.random() * 3).toFixed(2)}s;--c:${AVATAR_COLORS[i % AVATAR_COLORS.length]};--r:${Math.floor(Math.random() * 360)}deg"></i>`).join('')}</div>`;
 }
 
 function awardHtml(title, a, unit) {
   if (!a) return '';
-  return `<div class="award"><div class="title">${title}</div><div class="who">${a.names.map(esc).join(' & ')}</div><div class="muted">${a.value} ${unit}</div></div>`;
+  return `<div class="award">
+    <div class="award-avatars">${a.names.slice(0, 3).map((n) => avatarSvg(avatarOf(n), { mood: 'smug' })).join('')}</div>
+    <div>
+      <div class="title">${title}</div>
+      <div class="who">${a.names.map(esc).join(' & ')}</div>
+      <div class="muted">${a.value} ${a.value === 1 ? unit.replace(/s\b/, '') : unit}</div>
+    </div>
+  </div>`;
 }
 
 function endScreen() {
   const top = state.leaderboard[0];
-  const tied = state.leaderboard.filter((p) => p.score === top.score).map((p) => p.name);
+  const winners = state.leaderboard.filter((p) => p.score === top.score);
   return `
     ${header()}
-    <div class="winner">${tied.length > 1 ? `Tie: ${tied.map(esc).join(' & ')}` : `${esc(top.name)} wins!`}</div>
-    <div class="awards">
-      ${awardHtml('🕶️ Master Smuggler', state.awards.smuggler, 'players fooled')}
-      ${awardHtml('🐕 Bloodhound', state.awards.bloodhound, 'words caught')}
+    ${confetti()}
+    <div class="endgrid">
+      <div class="endleft">
+        <div class="podium">
+          <div class="winner-avatars">${winners.map((w) => avatarSvg(w.avatar, { mood: 'smug' })).join('')}</div>
+          <div class="winner">${winners.length > 1 ? `Tie: ${winners.map((w) => esc(w.name)).join(' & ')}` : `${esc(top.name)} wins!`}</div>
+        </div>
+        <div class="awards">
+          ${awardHtml('🕶️ Master Smuggler', state.awards.smuggler, 'players fooled')}
+          ${awardHtml('🐕 Bloodhound', state.awards.bloodhound, 'words caught')}
+          ${awardHtml('❤️ Crowd Favorite', state.awards.favorite, 'rounds won')}
+        </div>
+      </div>
+      <div class="board final">${state.leaderboard.map((p, i) => rowHtml(p, i, { from: p.score, showDelta: false })).join('')}</div>
     </div>
-    ${board(false)}
     <div class="tv-actions"><button data-act="playAgain" class="primary">Play again</button></div>`;
 }
 
 const screens = { lobby, write: writeScreen, hunt: huntScreen, reveal: revealScreen, scores: scoresScreen, end: endScreen };
 
+// Only touch the DOM when the markup actually changed, so animations aren't restarted.
 function render() {
-  if (state) app.innerHTML = screens[state.phase]();
+  if (!state) return;
+  const html = screens[state.phase]();
+  state.players.forEach((p) => seen.add(p.name));
+  if (html !== lastHtml) {
+    app.innerHTML = html;
+    lastHtml = html;
+  }
+  if (state.phase === 'scores') animateScores();
 }
 
 startTimerLoop(clock);

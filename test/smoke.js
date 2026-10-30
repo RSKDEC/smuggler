@@ -46,6 +46,12 @@ server.listen(0, async () => {
     }
     await waitHost((st) => st.players.length === 4 && st.canStart === null);
 
+    // Characters: unique colors are enforced.
+    const colors = hostState.players.map((p) => p.avatar.color);
+    assert.strictEqual(new Set(colors).size, 4, 'players start with distinct colors');
+    assert.ok((await call(phones[1].s, 'player:action', { type: 'avatar', color: colors[0], disguise: 1 })).error, 'color clash rejected');
+    assert.strictEqual((await call(phones[1].s, 'player:action', { type: 'avatar', color: 9, disguise: 3 })).error, null);
+
     assert.ok((await call(phones[1].s, 'player:action', { type: 'start' })).error, 'only VIP starts');
     assert.strictEqual((await call(phones[0].s, 'player:action', { type: 'start' })).error, null);
     const first = await waitHost((st) => st.phase === 'write');
@@ -79,9 +85,13 @@ server.listen(0, async () => {
       assert.strictEqual(hunt.answers[0].word, undefined, 'TV must not leak words');
       await tick();
 
-      // Ana always catches; everyone else picks "decoy". Ben's answer is the one to check.
+      // Ana always catches; everyone else falls for the word "decoy".
+      // Everyone hearts Ben's answer except Ben, who hearts Ana's.
       const slotOf = new Map(names.map((n) => [n, latest.get(n).mine.slot]));
       for (const p of phones) {
+        const fav = p.name === 'Ben' ? slotOf.get('Ana') : slotOf.get('Ben');
+        assert.ok((await call(p.s, 'player:action', { type: 'heart', slot: slotOf.get(p.name) })).error, 'cannot heart own answer');
+        assert.strictEqual((await call(p.s, 'player:action', { type: 'heart', slot: fav })).error, null);
         for (const a of hunt.answers) {
           if (a.slot === slotOf.get(p.name)) continue;
           const author = names.find((n) => slotOf.get(n) === a.slot);
@@ -102,11 +112,13 @@ server.listen(0, async () => {
       await scores;
       await tick();
 
-      // Ana: catches 3 (+300); her word fools the other 3 (+150).
-      // Others: caught by Ana, fool 2 others (+100); catch nobody.
+      // Ana: catches 3 (+300), fools 3 (+150), and 3 fell for her decoy (+50).
+      // Others: fool 2 (+100), 2 fell for their decoy (+50). Ben is crowd favorite (+100).
       const gain = (n) => latest.get(n).me.score - before.get(n);
-      assert.strictEqual(gain('Ana'), 450);
-      for (const n of ['Ben', 'Cy', 'Dee']) assert.strictEqual(gain(n), 100);
+      assert.strictEqual(gain('Ana'), 500);
+      assert.strictEqual(gain('Ben'), 250);
+      for (const n of ['Cy', 'Dee']) assert.strictEqual(gain(n), 150);
+      assert.strictEqual(hostState.favorites[0].author, 'Ben');
 
       const nextPhase = round === first.totalRounds ? 'end' : 'write';
       const waiting = waitHost((st) => st.phase === nextPhase && (nextPhase === 'end' || st.round === round + 1));
@@ -117,6 +129,7 @@ server.listen(0, async () => {
     const end = hostState;
     assert.strictEqual(end.leaderboard[0].name, 'Ana');
     assert.deepStrictEqual(end.awards.bloodhound.names, ['Ana']);
+    assert.deepStrictEqual(end.awards.favorite.names, ['Ben']);
     assert.strictEqual((await call(host, 'host:action', { action: 'playAgain' })).error, null);
     console.log('✓ smoke test passed: full game played with 4 phones');
     process.exit(0);
