@@ -14,22 +14,42 @@ const save = (code) => { try { sessionStorage.setItem(HOST_KEY, code); } catch {
 
 const joinUrl = (code) => `${location.origin}/play?room=${code}`;
 
+// On a Chromecast (cast.html) the TV waits for a phone to say which room to show.
+const CAST = !!window.SMUGGLER_CAST;
+let castCode;
+if (CAST) document.body.classList.add('cast');
+
 function onRoom(res) {
   save(res.code);
+  if (window.onSmugglerRoom) window.onSmugglerRoom(res.code);
   socket.emit('host:qr', { url: joinUrl(res.code) }, (r) => {
     qr = r.dataUrl || null;
     render();
   });
 }
 
-socket.on('connect', () => {
-  const code = saved();
+function connectRoom() {
+  if (CAST && castCode === undefined) return;
+  const code = CAST ? castCode : saved();
   if (code) {
     socket.emit('host:resume', { code }, (res) => (res.error ? socket.emit('host:create', null, onRoom) : onRoom(res)));
   } else {
     socket.emit('host:create', null, onRoom);
   }
-});
+}
+
+socket.on('connect', connectRoom);
+
+// Called by cast-receiver.js: show this room, or a new one when code is null.
+window.smugglerShow = (code) => {
+  if (code && state && state.code === code) return window.onSmugglerRoom && window.onSmugglerRoom(code);
+  castCode = code || null;
+  if (code) save(code);
+  if (socket.connected) connectRoom();
+};
+
+// Chromecasts allow audio without a click.
+if (CAST) setTimeout(() => { if (sound.unlock()) setTimeout(() => { syncMusic(); render(); }, 300); }, 0);
 
 socket.on('host:state', (s) => {
   const prev = state;

@@ -64,6 +64,35 @@ function act(msg) {
 
 // ---------------- join ----------------
 
+// ---------------- Chromecast ----------------
+
+let castNote = '';
+
+function castSlot() {
+  if (!castSender.available) return '';
+  return `<div class="panel center castpanel">
+      <button class="ghost big" data-cast="new">📺 Cast a new game to your TV</button>
+      <p class="muted" style="margin:0">${castNote || 'Starts the game screen on your Chromecast, no laptop needed.'}</p>
+    </div>`;
+}
+
+castSender.onChange = () => {
+  const slot = document.getElementById('castslot');
+  if (slot) slot.innerHTML = castSlot();
+  else if (state) render();
+};
+
+// The TV tells us its room code: pre-fill the join form.
+castSender.onRoom = (code) => {
+  if (state) return;
+  const input = document.getElementById('code');
+  if (!input) return;
+  input.value = code;
+  castNote = `✅ Room <b>${esc(code)}</b> is on your TV. Enter your name and join!`;
+  document.getElementById('castslot').innerHTML = castSlot();
+  document.getElementById('name').focus();
+};
+
 function renderJoin(msg = '') {
   const s = loadSession();
   const room = (params.get('room') || (s && s.code) || '').toUpperCase();
@@ -74,7 +103,8 @@ function renderJoin(msg = '') {
       <label>Your name<input id="name" maxlength="14" autocomplete="nickname" value="${esc((s && s.name) || '')}" placeholder="Name"></label>
       <div class="err">${esc(msg)}</div>
       <button class="primary big" type="submit">Join</button>
-    </form>`;
+    </form>
+    <div id="castslot">${castSlot()}</div>`;
   document.getElementById(room ? 'name' : 'code').focus();
   document.getElementById('join').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -93,6 +123,7 @@ function bar() {
   return `
     <div class="bar">
       <span class="who">${avatarSvg(state.me.avatar)}<b>${state.me.vip ? '♛ ' : ''}${esc(state.me.name)}</b></span>
+      ${castSender.available ? `<button class="castbtn ${castSender.connected ? 'on' : ''}" data-cast="room" aria-label="Show this game on the TV">📺 ${castSender.connected ? 'On TV' : 'Cast'}</button>` : ''}
       <span class="pts">${state.me.score}</span>
     </div>`;
 }
@@ -347,10 +378,11 @@ function render() {
 }
 
 app.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-act],[data-slot],[data-heart],[data-color],[data-disguise],[data-setting],[data-kick],[data-reroll]');
+  const el = e.target.closest('[data-act],[data-slot],[data-heart],[data-color],[data-disguise],[data-setting],[data-kick],[data-reroll],[data-cast]');
   if (!el || el.disabled) return;
   const d = el.dataset;
-  if (d.act) act({ type: d.act });
+  if (d.cast) castSender.show(d.cast === 'room' && state ? state.code : null);
+  else if (d.act) act({ type: d.act });
   else if (d.reroll) act({ type: 'reroll', which: Number(d.reroll) });
   else if (d.kick) {
     if (confirm(`Remove ${d.kick} from the game?`)) act({ type: 'kick', name: d.kick });

@@ -43,6 +43,20 @@ The repo includes a `render.yaml`. In Render, choose **New → Blueprint** and p
 
 Free Render services go to sleep after about 15 minutes without traffic, so the first visit afterwards can take up to a minute to load.
 
+## Cast to a Chromecast
+
+The TV screen can run directly on a Chromecast (including Chromecast with Google TV), started from a phone, with no laptop needed.
+
+One-time setup:
+
+1. In the [Google Cast SDK Developer Console](https://cast.google.com/publish) (one-time $5 fee), choose **Add new application → Custom Receiver**. Set the receiver URL to `https://<your-app>.onrender.com/cast`, then copy the **Application ID** it gives you.
+2. In the same console, choose **Add new device** and enter your Chromecast's serial number. Unpublished apps only run on registered devices. Registration can take about 15 minutes, and then you restart the Chromecast.
+3. In Render, open the service → **Environment** → add `CAST_APP_ID` = your Application ID. Render redeploys automatically.
+
+To play: on an **Android phone using Chrome** (or Chrome on a laptop), on the same Wi-Fi as the Chromecast, open `/play` and tap **📺 Cast a new game to your TV**. The TV shows the room code, and everyone joins as usual; iPhones can join, they just can't start the cast. A player already in a game can tap **📺 Cast** in the top bar to move that game onto the TV.
+
+How it works: `public/cast.js` is the phone side (Cast Web Sender) and `public/cast.html` + `cast-receiver.js` run on the Chromecast (Cast Web Receiver). They exchange the room code over the `urn:x-cast:com.smuggler.game` channel. Opening `/cast` in a normal browser acts like `/host`, which is handy for testing.
+
 ## Run it
 
 ```bash
@@ -69,6 +83,8 @@ public/host.*      TV screen
 public/play.*      Phone controller
 public/avatar.js   Suitcase characters (SVG)
 public/sound.js    Synthesized sound effects and music
+public/cast.js     Chromecast sender (phone's Cast button)
+public/cast.html   Chromecast receiver page (+ cast-receiver.js)
 test/smoke.js      End-to-end test
 ```
 

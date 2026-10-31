@@ -17,6 +17,13 @@ const pub = path.join(__dirname, 'public');
 app.use(express.static(pub));
 app.get('/host', (req, res) => res.sendFile(path.join(pub, 'host.html')));
 app.get('/play', (req, res) => res.sendFile(path.join(pub, 'play.html')));
+// Chromecast Web Receiver (register https://<host>/cast in the Google Cast console).
+app.get('/cast', (req, res) => res.sendFile(path.join(pub, 'cast.html')));
+// Runtime config for the phones: the Cast App ID comes from the CAST_APP_ID env var.
+app.get('/config.js', (req, res) => {
+  res.type('application/javascript').set('Cache-Control', 'no-store');
+  res.send(`window.SMUGGLER_CONFIG = ${JSON.stringify({ castAppId: process.env.CAST_APP_ID || '' })};`);
+});
 
 const rooms = new Map();
 
@@ -48,7 +55,14 @@ const reply = (cb, data) => typeof cb === 'function' && cb(data);
 io.on('connection', (socket) => {
   const room = () => rooms.get(socket.data.code);
 
+  // A TV that switches rooms (e.g. a Chromecast re-cast) stops listening to the old one.
+  const leaveHostRoom = () => {
+    const old = room();
+    if (old && socket.data.role === 'host') old.hostSockets.delete(socket.id);
+  };
+
   socket.on('host:create', (_, cb) => {
+    leaveHostRoom();
     const r = createRoom();
     socket.data = { role: 'host', code: r.code };
     r.hostSockets.add(socket.id);
@@ -59,6 +73,7 @@ io.on('connection', (socket) => {
   socket.on('host:resume', ({ code } = {}, cb) => {
     const r = rooms.get(String(code || '').toUpperCase());
     if (!r) return reply(cb, { error: 'Room not found' });
+    leaveHostRoom();
     socket.data = { role: 'host', code: r.code };
     r.hostSockets.add(socket.id);
     reply(cb, { code: r.code });
