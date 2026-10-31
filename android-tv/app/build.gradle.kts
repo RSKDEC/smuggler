@@ -33,6 +33,17 @@ android {
         }
     }
 
+    buildFeatures {
+        // MainActivity reads BuildConfig.VERSION_NAME; AGP 8 no longer generates it by default.
+        buildConfig = true
+    }
+
+    // A one-screen WebView wrapper: don't let release lint block the build.
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

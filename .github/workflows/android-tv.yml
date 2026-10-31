@@ -36,7 +36,7 @@ jobs:
 
       - name: Build APK
         working-directory: android-tv
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: gradle assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
