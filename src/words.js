@@ -72,4 +72,88 @@ const CONTRABAND = [
   'invoice', 'cheese', 'tupperware', 'fondue', 'hovercraft', 'jacuzzi', 'magician', 'mattress', 'nugget', 'origami',
 ];
 
-module.exports = { PROMPTS, CONTRABAND };
+// Family pack: kid-friendly prompts and words.
+const FAMILY_PROMPTS = [
+  'Write a note to your teacher explaining your missing homework.',
+  'Describe the best birthday party ever.',
+  'Give a pep talk to a nervous goldfish.',
+  'Write a lost-pet poster for an unusual pet.',
+  'Describe your dream treehouse.',
+  'Invent a new ice cream flavor and sell it to us.',
+  'Write a postcard from summer camp.',
+  'Explain to a robot what a hug is.',
+  'Write the rules for a brand-new playground game.',
+  'Describe what your dog does when nobody is home.',
+  'Write a weather forecast for a magical kingdom.',
+  'Introduce yourself as the new class pet.',
+  'Write a thank-you note to your favorite vegetable.',
+  'Describe the strangest dream you had last week.',
+  'Write a review of the school cafeteria.',
+  'Explain why you need a later bedtime.',
+  'Describe a superhero whose power is very small.',
+  'Write a letter to the tooth fairy.',
+  'Give directions to a secret hideout.',
+  'Write a news report about a runaway shopping cart.',
+  'Describe what aliens would think of your fridge.',
+  'Write a fortune cookie message.',
+  'Plan the perfect snow day.',
+  'Narrate a nature documentary about your cat.',
+  'Write a wanted poster for whoever ate the last cookie.',
+  'Describe a new sport for the next Olympics.',
+  'Write instructions for building the best blanket fort.',
+  'Pitch a new board game to a toy company.',
+  'Write a letter to your future self.',
+  'Explain your job to a five-year-old.',
+];
+
+const FAMILY_CONTRABAND = [
+  'pelican', 'lasagna', 'volcano', 'trombone', 'cactus', 'submarine', 'llama', 'pajamas', 'meatball', 'tornado',
+  'walrus', 'kazoo', 'avocado', 'helicopter', 'penguin', 'spaghetti', 'igloo', 'pirate', 'unicorn', 'hamster',
+  'jellyfish', 'cowboy', 'banjo', 'dinosaur', 'pickle', 'wizard', 'flamingo', 'trampoline', 'burrito', 'octopus',
+  'astronaut', 'raccoon', 'lighthouse', 'pineapple', 'glitter', 'hedgehog', 'pudding', 'mermaid', 'scarecrow', 'gorilla',
+  'pancake', 'noodle', 'beehive', 'lobster', 'crocodile', 'snowman', 'waffle', 'hippo', 'sombrero', 'treasure',
+  'tadpole', 'yeti', 'broccoli', 'parrot', 'cupcake', 'dragon', 'xylophone', 'sloth', 'marshmallow', 'robot',
+  'squirrel', 'tiara', 'ostrich', 'banana', 'kangaroo', 'wiggle', 'tickle', 'fluffy', 'wobbly', 'bouncy',
+];
+
+// Office party pack: workplace prompts, classic contraband.
+const OFFICE_PROMPTS = [
+  'Write an out-of-office email reply.',
+  'Explain to a new coworker how the office microwave works.',
+  'Leave a note for whoever ate your lunch from the fridge.',
+  'Write the agenda for a meeting that should have been an email.',
+  'Give a toast at the retirement party of someone you barely know.',
+  'Write your answer to "What is your greatest weakness?"',
+  'Describe your desk to a detective.',
+  'Write the company announcement about the new coffee machine.',
+  'Explain why you were late to the Monday meeting.',
+  'Write a performance review for the office printer.',
+  'Pitch a new team-building activity.',
+  'Write the mission statement for a very small company.',
+  'Describe the office holiday party to someone who missed it.',
+  'Write a LinkedIn post about something that happened at lunch.',
+  'Apologize for replying-all to the entire company.',
+  'Write a job ad for the most boring position ever.',
+  'Describe your morning commute as an epic adventure.',
+  'Write a sticky note to leave on the broken copier.',
+  'Explain your job to a five-year-old.',
+  'Write the safety briefing for the office kitchen.',
+  'Write a farewell email on your last day.',
+  'Give a status update on a project that is on fire.',
+  'Write a five-star review of the conference room.',
+  'Describe what the boss does all day.',
+  'Write the rules for the office fridge.',
+  'Give a motivational speech before the quarterly report.',
+  'Explain to IT what happened to your laptop.',
+  'Write a slogan and a short ad for a brand-new bank.',
+  'Describe the worst hotel you stayed in on a work trip.',
+  'Write your excuse for missing the team photo.',
+];
+
+const PACKS = {
+  classic: { name: 'Classic', prompts: PROMPTS, words: CONTRABAND },
+  family: { name: 'Family-friendly', prompts: FAMILY_PROMPTS, words: FAMILY_CONTRABAND },
+  office: { name: 'Office party', prompts: OFFICE_PROMPTS, words: CONTRABAND },
+};
+
+module.exports = { PROMPTS, CONTRABAND, PACKS };

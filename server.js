@@ -100,6 +100,14 @@ io.on('connection', (socket) => {
   socket.on('player:action', (msg = {}, cb) => {
     const r = room();
     if (!r || socket.data.role !== 'player') return reply(cb, { error: 'Not in a room' });
+    if (msg.type === 'kick') {
+      if (socket.data.playerId !== r.vipId) return reply(cb, { error: 'Only the ♛ VIP can do that' });
+      if (msg.name === r.players.get(socket.data.playerId)?.name) return reply(cb, { error: "You can't remove yourself" });
+      const { player, error } = r.kick(msg.name);
+      if (player?.socketId) io.to(player.socketId).emit('player:kicked');
+      reply(cb, { error: error || null });
+      return broadcast(r);
+    }
     const error = r.playerAction(socket.data.playerId, msg);
     reply(cb, { error: error || null });
     broadcast(r);

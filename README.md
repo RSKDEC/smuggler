@@ -18,10 +18,30 @@ Everyone answers the same writing prompt, like *"Write a 5-star review of a toas
 | Each player your word slips past | +50 |
 | Perfect decoy: 2+ players tap the same wrong word in your answer | +50 |
 | Crowd favorite: most ❤️ that round | +100 |
+| 💰 Most Wanted bounty: catching the current leader's word | +50 extra |
+
+**🔥 Double Contraband finale:** in the last round everyone smuggles two words, guessers tap two words per answer, and all points are doubled.
+
+**💰 Most Wanted:** from round 2, the leader's answer is marked WANTED on the TV, and anyone who catches their word earns a bounty.
 
 The game is 5 rounds for 3–10 players. At the end, the TV awards **🕶️ Master Smuggler** (fooled the most players), **🐕 Bloodhound** (caught the most words) and **❤️ Crowd Favorite** (won the most rounds of ❤️ votes).
 
 **Sound:** the TV plays sound effects and a background loop, all synthesized in the browser (no audio files). Click anywhere on the TV page once to turn sound on, and use 🔊/🔇 to mute.
+
+## Settings and host controls (VIP's phone)
+
+Once the TV is cast, nobody can click on it, so the **♛ VIP** (the first player to join) runs the game from their phone:
+
+- **Lobby settings:** word pack (Classic, Family-friendly, Office party), 3/5/7 rounds, pace (Relaxed, Normal, Quick), and the finale and Most Wanted switches.
+- **Host controls** during the game: pause/resume, skip the timer, remove a player.
+
+The TV keeps its own Start, Next, Pause and Skip buttons for when it's run from a laptop.
+
+## Deploy on Render
+
+The repo includes a `render.yaml`. In Render, choose **New → Blueprint** and pick this repository, or create a **Web Service** with build command `npm ci` and start command `npm start`. Open `https://<your-app>.onrender.com/host` on the TV.
+
+Free Render services go to sleep after about 15 minutes without traffic, so the first visit afterwards can take up to a minute to load.
 
 ## Run it
 
@@ -44,7 +64,7 @@ If a phone refreshes or drops, the player gets their seat back automatically. A 
 ```
 server.js          Express + Socket.IO server, room registry
 src/room.js        Game rules and state machine (lobby → write → hunt → reveal → scores → end)
-src/words.js       Prompts and contraband words (edit these to add your own)
+src/words.js       Word packs: prompts and contraband words (edit these to add your own)
 public/host.*      TV screen
 public/play.*      Phone controller
 public/avatar.js   Suitcase characters (SVG)

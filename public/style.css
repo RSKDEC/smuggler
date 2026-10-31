@@ -263,3 +263,47 @@ input:focus, textarea:focus { outline: none; border-color: var(--amber); }
 .phone .item { padding: 10px 12px; border-radius: 10px; background: #1c1612; }
 .phone .item.good { border-left: 4px solid var(--good); }
 .phone .item.bad { border-left: 4px solid var(--stamp); }
+
+/* ---------------- Batch 2: finale, wanted, pause ---------------- */
+.hot { color: #ff7b2e; }
+.finale-banner { align-self: center; font-family: 'Bungee', sans-serif; font-size: 1.5vw; color: #2a1000; padding: .8vh 2vw; border-radius: 999px;
+  background: linear-gradient(90deg, #ff7b2e, var(--amber), #ff7b2e); background-size: 200% 100%; animation: pop .5s both, shimmer 2.5s linear infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+.posters { display: flex; justify-content: center; gap: 2vw; }
+.poster { width: 12vw; text-align: center; background: #e9d8b4; color: #3a2614; padding: 1.2vh .8vw 1.4vh; border-radius: 4px;
+  box-shadow: 0 .6vh 0 rgba(0,0,0,.4); transform: rotate(-2deg); animation: pop .5s .3s both; position: relative; }
+.poster::before { content: ''; position: absolute; top: .6vh; left: 50%; width: 1vw; height: 1vw; margin-left: -.5vw; border-radius: 50%; background: var(--stamp); }
+.poster-title { font-family: 'Bungee', sans-serif; font-size: 2vw; letter-spacing: .2vw; margin-top: .8vh; }
+.poster .avatar { width: 6vw; margin: .6vh auto; }
+.poster-name { font-weight: 700; font-size: 1.3vw; }
+.poster-bounty { font-family: 'Bungee', sans-serif; font-size: .95vw; color: var(--stamp); margin-top: .4vh; }
+
+.paper.is-wanted { box-shadow: 0 4px 0 rgba(0,0,0,.35), 0 0 0 .25vw var(--stamp); }
+.wanted-badge { position: absolute; top: -1.4vh; right: 1vw; font-family: 'Bungee', sans-serif; font-size: .9vw; background: var(--stamp); color: #fff; padding: .2vh .7vw; border-radius: 6px; transform: rotate(3deg); }
+.wanted-badge.inline { position: static; display: inline-block; font-size: .8em; margin-left: .4vw; }
+
+.paused-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(10,8,6,.72); backdrop-filter: blur(4px); animation: fadeIn .25s both; }
+.paused-card { font-family: 'Bungee', sans-serif; font-size: 5vw; color: var(--amber); text-align: center; display: flex; flex-direction: column; gap: 1vh; }
+.paused-card small { font-family: 'Rubik', sans-serif; font-size: 1.4vw; color: var(--muted); }
+
+/* phone: host controls, settings, finale, wanted */
+.phone .hostbox { border: 2px dashed var(--panel2); }
+.phone .hostbox summary { cursor: pointer; font-weight: 700; color: var(--amber); }
+.phone .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+.phone .seg button { padding: 10px 6px; font-size: .95rem; }
+.phone .seg button.on { background: var(--amber); color: #2a1a00; }
+.phone .setting { display: flex; flex-direction: column; gap: 6px; }
+.phone .setting label { font-size: .85rem; color: var(--muted); }
+.phone .toggle { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.phone .toggle button { min-width: 72px; padding: 8px 12px; }
+.phone .toggle button.on { background: var(--good); color: #062a17; }
+.phone .kickrow { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--panel2); }
+.phone .kickrow:last-child { border-bottom: 0; }
+.phone .kickrow button { padding: 6px 12px; font-size: .85rem; }
+.phone .finale { text-align: center; font-family: 'Bungee', sans-serif; color: #2a1000; padding: 8px; border-radius: 10px; background: linear-gradient(90deg, #ff7b2e, var(--amber)); }
+.phone .wantedme { text-align: center; padding: 10px; border-radius: 10px; background: #e9d8b4; color: #3a2614; font-weight: 700; }
+.phone .wantedme b { font-family: 'Bungee', sans-serif; color: var(--stamp); }
+.phone .paused { text-align: center; font-family: 'Bungee', sans-serif; color: var(--amber); padding: 10px; border-radius: 10px; background: var(--panel); border: 2px solid var(--amber); }
+.phone .contraband .tags { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.phone .wanted-badge { position: absolute; top: -12px; right: 40px; font-size: .75rem; padding: 2px 8px; }

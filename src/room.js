@@ -1,17 +1,20 @@
 const crypto = require('crypto');
-const { PROMPTS, CONTRABAND } = require('./words');
+const { PACKS } = require('./words');
 
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 10;
-const POINTS = { catch: 100, sneak: 50, decoy: 50, favorite: 100 };
+const POINTS = { catch: 100, sneak: 50, decoy: 50, favorite: 100, bounty: 50 };
 const MIN_ANSWER = 10;
-const MAX_ANSWER = 200;
+const MAX_ANSWER = 220;
 const SLOTS = 'ABCDEFGHIJ';
 // Must match the palette/disguise lists in public/avatar.js.
 const AVATAR_COLORS = 10;
 const AVATAR_DISGUISES = 6;
 // A wrong word needs at least this many picks to earn its author the decoy bonus.
 const DECOY_MIN_PICKS = 2;
+const BASE_SECONDS = { write: 120, hunt: 100, reveal: 10 };
+const PACES = { relaxed: 1.5, normal: 1, quick: 0.7 };
+const ROUND_CHOICES = [3, 5, 7];
 
 function shuffle(arr) {
   const a = arr.slice();
@@ -44,10 +47,12 @@ class Room {
     this.onChange = onChange;
     this.players = new Map();
     this.hostSockets = new Set();
-    this.settings = { rounds: 5, writeSeconds: 120, huntSeconds: 100, revealSeconds: 10 };
+    this.settings = { rounds: 5, pace: 'normal', pack: 'classic', finale: true, wanted: true };
     this.timer = null;
+    this.timerFn = null;
     this.deadline = null;
     this.duration = null;
+    this.paused = null;
     this.lastActive = Date.now();
     this.reset();
   }
@@ -62,11 +67,14 @@ class Room {
     this.guesses = new Map();
     this.hearts = new Map();
     this.hunters = new Set();
+    this.wanted = new Set();
     this.results = null;
     this.favorite = null;
     this.revealIdx = 0;
     this.usedPrompts = new Set();
     this.usedWords = new Set();
+    // Removed players stay out once the next game starts.
+    for (const [id, p] of this.players) if (p.kicked) this.players.delete(id);
     for (const p of this.players.values()) {
       Object.assign(p, { score: 0, lastScore: 0, caught: 0, sneaked: 0, loved: 0, rerolls: 1 });
     }
@@ -76,22 +84,50 @@ class Room {
     this.lastActive = Date.now();
   }
 
+  // ---------- timers (pausable) ----------
+
   clearTimer() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.timerFn = null;
     this.deadline = null;
     this.duration = null;
+    this.paused = null;
   }
 
-  setTimer(seconds, fn) {
+  setTimer(seconds, fn, duration = seconds) {
     this.clearTimer();
+    this.timerFn = fn;
     this.deadline = Date.now() + seconds * 1000;
-    this.duration = seconds;
+    this.duration = duration;
     this.timer = setTimeout(() => {
       this.timer = null;
+      this.timerFn = null;
       fn();
       this.onChange();
     }, seconds * 1000);
+  }
+
+  seconds(kind) {
+    const base = BASE_SECONDS[kind];
+    return kind === 'reveal' ? base : Math.round(base * PACES[this.settings.pace]);
+  }
+
+  pause() {
+    if (this.paused || !this.timer) return 'Nothing to pause';
+    const remaining = Math.max(1000, this.deadline - Date.now());
+    const { timerFn: fn, duration } = this;
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.paused = { remaining, fn, duration };
+    return null;
+  }
+
+  resume() {
+    if (!this.paused) return 'Not paused';
+    const { remaining, fn, duration } = this.paused;
+    this.setTimer(remaining / 1000, fn, duration);
+    return null;
   }
 
   draw(pool, used) {
@@ -105,36 +141,56 @@ class Room {
     return pick;
   }
 
+  get pack() {
+    return PACKS[this.settings.pack] || PACKS.classic;
+  }
+
+  isFinale(round = this.round) {
+    return this.settings.finale && this.settings.rounds > 1 && round === this.settings.rounds;
+  }
+
+  get multiplier() {
+    return this.isFinale() ? 2 : 1;
+  }
+
   // ---------- players ----------
 
+  active() {
+    return [...this.players.values()].filter((p) => !p.kicked);
+  }
+
+  connected() {
+    return this.active().filter((p) => p.connected);
+  }
+
   get vipId() {
-    const all = [...this.players.values()];
+    const all = this.active();
     const vip = all.find((p) => p.connected) || all[0];
     return vip ? vip.id : null;
   }
 
-  connected() {
-    return [...this.players.values()].filter((p) => p.connected);
-  }
-
   join(name, playerId) {
-    if (playerId && this.players.has(playerId)) return { player: this.players.get(playerId) };
+    if (playerId && this.players.has(playerId)) {
+      const p = this.players.get(playerId);
+      return p.kicked ? { error: 'You were removed from this game' } : { player: p };
+    }
 
     name = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 14);
     if (!name) return { error: 'Enter a name' };
 
     const existing = [...this.players.values()].find((p) => norm(p.name) === norm(name));
     if (existing) {
+      if (existing.kicked) return { error: 'That player was removed from this game' };
       // Same name on a new device: let them take over a dropped seat.
       if (!existing.connected) return { player: existing };
       return { error: 'That name is taken' };
     }
-    if (this.players.size >= MAX_PLAYERS) return { error: 'Room is full' };
+    if (this.active().length >= MAX_PLAYERS) return { error: 'Room is full' };
 
-    const taken = new Set([...this.players.values()].map((p) => p.avatar.color));
+    const taken = new Set(this.active().map((p) => p.avatar.color));
     const color = [...Array(AVATAR_COLORS).keys()].find((c) => !taken.has(c)) ?? 0;
     const player = {
-      id: crypto.randomUUID(), name, connected: true, socketId: null,
+      id: crypto.randomUUID(), name, connected: true, socketId: null, kicked: false,
       avatar: { color, disguise: Math.floor(Math.random() * AVATAR_DISGUISES) },
       score: 0, lastScore: 0, caught: 0, sneaked: 0, loved: 0, rerolls: 1,
     };
@@ -144,48 +200,98 @@ class Room {
     return { player };
   }
 
+  // Returns the removed player (so the server can notify their socket), or an error string.
+  kick(name) {
+    const p = this.active().find((x) => x.name === name);
+    if (!p) return { error: 'No such player' };
+    if (this.phase === 'lobby') {
+      this.players.delete(p.id);
+    } else {
+      p.kicked = true;
+      p.connected = false;
+      if (this.phase === 'write') {
+        this.entries.delete(p.id);
+        if (this.allWritten()) this.beginHunt();
+      } else if (this.phase === 'hunt' && this.allDone()) {
+        this.reveal();
+      }
+    }
+    return { player: p };
+  }
+
   setAvatar(p, color, disguise) {
     if (!Number.isInteger(color) || color < 0 || color >= AVATAR_COLORS) return 'Bad color';
     if (!Number.isInteger(disguise) || disguise < 0 || disguise >= AVATAR_DISGUISES) return 'Bad disguise';
-    const clash = [...this.players.values()].some((x) => x !== p && x.avatar.color === color);
+    const clash = this.active().some((x) => x !== p && x.avatar.color === color);
     if (clash) return 'Someone already has that color';
     p.avatar = { color, disguise };
     return null;
   }
 
+  setSettings(s = {}) {
+    if (this.phase !== 'lobby') return 'Settings can only change in the lobby';
+    const next = { ...this.settings };
+    if (s.rounds !== undefined) {
+      if (!ROUND_CHOICES.includes(s.rounds)) return 'Bad round count';
+      next.rounds = s.rounds;
+    }
+    if (s.pace !== undefined) {
+      if (!PACES[s.pace]) return 'Bad pace';
+      next.pace = s.pace;
+    }
+    if (s.pack !== undefined) {
+      if (!PACKS[s.pack]) return 'Bad word pack';
+      next.pack = s.pack;
+    }
+    if (s.finale !== undefined) next.finale = !!s.finale;
+    if (s.wanted !== undefined) next.wanted = !!s.wanted;
+    this.settings = next;
+    return null;
+  }
+
   canStart() {
-    if (this.players.size < MIN_PLAYERS) return `Need at least ${MIN_PLAYERS} players`;
+    if (this.active().length < MIN_PLAYERS) return `Need at least ${MIN_PLAYERS} players`;
     return null;
   }
 
   // ---------- actions ----------
 
-  hostAction(action) {
-    this.touch();
-    switch (action) {
+  // Shared by the TV and the VIP's phone (the TV has no input once it's cast).
+  control(msg) {
+    switch (msg.type) {
       case 'start': return this.start();
       case 'next': return this.next();
       case 'skip': return this.skip();
       case 'playAgain': return this.playAgain();
+      case 'pause': return this.pause();
+      case 'resume': return this.resume();
+      case 'settings': return this.setSettings(msg.settings);
+      default: return undefined;
     }
-    return null;
+  }
+
+  hostAction(action) {
+    this.touch();
+    const r = this.control({ type: action });
+    return r === undefined ? 'Unknown action' : r;
   }
 
   playerAction(playerId, msg) {
     this.touch();
     const p = this.players.get(playerId);
-    if (!p) return 'Not in this room';
+    if (!p || p.kicked) return 'Not in this room';
     const isVip = p.id === this.vipId;
     switch (msg.type) {
-      case 'start': return isVip ? this.start() : 'Only the VIP can start';
-      case 'next': return isVip ? this.next() : 'Only the VIP can continue';
-      case 'playAgain': return isVip ? this.playAgain() : 'Only the VIP can restart';
       case 'avatar': return this.setAvatar(p, msg.color, msg.disguise);
-      case 'reroll': return this.reroll(p);
+      case 'reroll': return this.reroll(p, msg.which);
       case 'answer': return this.answer(p, msg.text);
       case 'guess': return this.guess(p, msg.slot, msg.idx);
       case 'heart': return this.heart(p, msg.slot);
-      default: return 'Unknown action';
+      default: {
+        if (!isVip) return 'Only the ♛ VIP can do that';
+        const r = this.control(msg);
+        return r === undefined ? 'Unknown action' : r;
+      }
     }
   }
 
@@ -205,6 +311,7 @@ class Room {
   }
 
   next() {
+    if (this.paused) return 'Game is paused';
     if (this.phase === 'reveal') {
       this.advanceReveal();
       return null;
@@ -216,43 +323,58 @@ class Room {
     return null;
   }
 
-  // Host can cut the current timer short.
+  // Cut the current timer short.
   skip() {
+    if (this.paused) this.paused = null;
     if (this.phase === 'write') this.beginHunt();
     else if (this.phase === 'hunt') this.reveal();
     else if (this.phase === 'reveal') this.advanceReveal();
+    else return 'Nothing to skip';
+    return null;
   }
 
   // ---------- write ----------
 
   deal(p) {
-    this.entries.set(p.id, { word: this.draw(CONTRABAND, this.usedWords), text: null, tokens: null, slot: null });
+    const count = this.isFinale() ? 2 : 1;
+    const words = [];
+    while (words.length < count) words.push(this.draw(this.pack.words, this.usedWords));
+    this.entries.set(p.id, { words, text: null, tokens: null, slot: null });
   }
 
   startRound() {
     this.round++;
-    this.prompt = this.draw(PROMPTS, this.usedPrompts);
+    this.prompt = this.draw(this.pack.prompts, this.usedPrompts);
     this.entries = new Map();
     this.guesses = new Map();
     this.hearts = new Map();
     this.results = null;
     this.favorite = null;
     this.revealIdx = 0;
-    for (const p of this.players.values()) {
+
+    // Most Wanted: whoever leads going into the round.
+    this.wanted = new Set();
+    const top = Math.max(0, ...this.active().map((p) => p.score));
+    if (this.settings.wanted && top > 0) {
+      this.active().filter((p) => p.score === top).forEach((p) => this.wanted.add(p.id));
+    }
+
+    for (const p of this.active()) {
       p.lastScore = p.score;
       this.deal(p);
     }
     this.phase = 'write';
-    this.setTimer(this.settings.writeSeconds, () => this.beginHunt());
+    this.setTimer(this.seconds('write'), () => this.beginHunt());
   }
 
-  reroll(p) {
+  reroll(p, which = 0) {
     if (this.phase !== 'write') return 'You can only swap your word while writing';
     const e = this.entries.get(p.id);
     if (!e || e.text) return 'Already submitted';
     if (p.rerolls <= 0) return 'No swaps left this game';
+    const i = Number.isInteger(which) && which >= 0 && which < e.words.length ? which : 0;
     p.rerolls--;
-    e.word = this.draw(CONTRABAND, this.usedWords);
+    e.words[i] = this.draw(this.pack.words.filter((w) => !e.words.includes(w)), this.usedWords);
     return null;
   }
 
@@ -266,21 +388,23 @@ class Room {
     if (text.length < MIN_ANSWER) return 'Write a bit more than that';
     if (text.length > MAX_ANSWER) return `Keep it under ${MAX_ANSWER} characters`;
     const tokens = tokenize(text);
-    if (!tokens.some((tok) => tok.w && isWord(tok.t, e.word))) {
-      return `You have to smuggle in "${e.word}"!`;
-    }
+    const missing = e.words.find((w) => !tokens.some((tok) => tok.w && isWord(tok.t, w)));
+    if (missing) return `You have to smuggle in "${missing}"!`;
     e.text = text;
     e.tokens = tokens;
-
-    const waiting = this.connected().filter((x) => this.entries.get(x.id) && !this.entries.get(x.id).text);
-    if (!waiting.length) this.beginHunt();
+    if (this.allWritten()) this.beginHunt();
     return null;
+  }
+
+  allWritten() {
+    return this.connected().every((x) => !this.entries.get(x.id) || this.entries.get(x.id).text);
   }
 
   // ---------- hunt ----------
 
   beginHunt() {
     if (this.phase !== 'write') return;
+    this.clearTimer();
     this.order = shuffle([...this.entries.keys()].filter((id) => this.entries.get(id).text));
     this.order.forEach((id, i) => {
       this.entries.get(id).slot = SLOTS[i];
@@ -292,7 +416,7 @@ class Room {
       return;
     }
     this.phase = 'hunt';
-    this.setTimer(this.settings.huntSeconds, () => this.reveal());
+    this.setTimer(this.seconds('hunt'), () => this.reveal());
   }
 
   entryBySlot(slot) {
@@ -300,6 +424,8 @@ class Room {
     return id ? { id, entry: this.entries.get(id) } : null;
   }
 
+  // Tapping a word toggles it. In the finale each answer takes two picks;
+  // picking a third drops the oldest.
   guess(p, slot, idx) {
     if (this.phase !== 'hunt') return 'Hunting is over';
     const found = this.entryBySlot(slot);
@@ -308,7 +434,13 @@ class Room {
     const tok = found.entry.tokens[idx];
     if (!Number.isInteger(idx) || !tok || !tok.w) return 'Tap a word';
     const mine = this.guesses.get(p.id) || {};
-    mine[slot] = idx;
+    let picks = mine[slot] || [];
+    if (picks.includes(idx)) picks = picks.filter((x) => x !== idx);
+    else {
+      picks = [...picks, idx];
+      if (picks.length > found.entry.words.length) picks.shift();
+    }
+    mine[slot] = picks;
     this.guesses.set(p.id, mine);
     this.hunters.add(p.id);
     if (this.allDone()) this.reveal();
@@ -325,12 +457,15 @@ class Room {
     return null;
   }
 
-  // Each player owes one pick per other answer, plus one heart.
+  // Each player owes a full set of picks per other answer, plus one heart.
   huntTodo(p) {
     const others = this.order.filter((id) => id !== p.id);
     if (!others.length) return { done: 0, total: 0 };
     const mine = this.guesses.get(p.id) || {};
-    const picks = others.filter((id) => mine[this.entries.get(id).slot] !== undefined).length;
+    const picks = others.filter((id) => {
+      const e = this.entries.get(id);
+      return (mine[e.slot] || []).length === e.words.length;
+    }).length;
     return { done: picks + (this.hearts.has(p.id) ? 1 : 0), total: others.length + 1 };
   }
 
@@ -355,50 +490,56 @@ class Room {
   reveal(skipToScores = false) {
     if (this.phase !== 'hunt' && this.phase !== 'write') return;
     this.clearTimer();
+    const m = this.multiplier;
+    const add = (id, pts, stat, n = 1) => {
+      const p = this.players.get(id);
+      if (!p) return;
+      p.score += pts;
+      if (stat) p[stat] += n;
+    };
 
     const heartCounts = {};
     for (const slot of this.hearts.values()) heartCounts[slot] = (heartCounts[slot] || 0) + 1;
 
     this.results = this.order.map((authorId) => {
       const e = this.entries.get(authorId);
+      const wanted = this.wanted.has(authorId);
+      const others = [...this.hunters].filter((id) => id !== authorId && this.players.has(id));
+
       const pickers = {};
-      const catchers = [];
       for (const [voterId, mine] of this.guesses) {
-        const idx = mine[e.slot];
-        if (idx === undefined || voterId === authorId) continue;
-        (pickers[idx] = pickers[idx] || []).push(voterId);
-        if (isWord(e.tokens[idx].t, e.word)) catchers.push(voterId);
+        if (voterId === authorId) continue;
+        for (const idx of mine[e.slot] || []) (pickers[idx] = pickers[idx] || []).push(voterId);
       }
-      const fooled = [...this.hunters].filter((id) => id !== authorId && !catchers.includes(id) && this.players.has(id));
+
+      const words = e.words.map((word) => {
+        const catchers = new Set();
+        for (const [idx, ids] of Object.entries(pickers)) {
+          if (isWord(e.tokens[idx].t, word)) ids.forEach((id) => catchers.add(id));
+        }
+        const fooled = others.filter((id) => !catchers.has(id)).length;
+        for (const id of catchers) add(id, (POINTS.catch + (wanted ? POINTS.bounty : 0)) * m, 'caught');
+        add(authorId, POINTS.sneak * fooled * m, 'sneaked', fooled);
+        return { word, catchers: [...catchers], fooled };
+      });
 
       // Decoy: the most-picked wrong word, if enough people fell for it.
       let decoy = null;
       for (const [idx, ids] of Object.entries(pickers)) {
         const tok = e.tokens[idx];
-        if (isWord(tok.t, e.word) || ids.length < DECOY_MIN_PICKS) continue;
+        if (e.words.some((w) => isWord(tok.t, w)) || ids.length < DECOY_MIN_PICKS) continue;
         if (!decoy || ids.length > decoy.count) decoy = { word: tok.t, count: ids.length };
       }
+      if (decoy) add(authorId, POINTS.decoy * m);
 
-      for (const id of catchers) {
-        const c = this.players.get(id);
-        if (c) { c.score += POINTS.catch; c.caught++; }
-      }
-      const author = this.players.get(authorId);
-      if (author) {
-        author.score += POINTS.sneak * fooled.length + (decoy ? POINTS.decoy : 0);
-        author.sneaked += fooled.length;
-      }
-      return { authorId, slot: e.slot, word: e.word, pickers, catchers, fooled, decoy, hearts: heartCounts[e.slot] || 0 };
+      return { authorId, slot: e.slot, words, pickers, decoy, wanted, hearts: heartCounts[e.slot] || 0 };
     });
 
     // Crowd favorite: the most-hearted answer(s).
     const maxHearts = Math.max(0, ...this.results.map((r) => r.hearts));
     if (maxHearts > 0) {
       const winners = this.results.filter((r) => r.hearts === maxHearts);
-      for (const r of winners) {
-        const a = this.players.get(r.authorId);
-        if (a) { a.score += POINTS.favorite; a.loved++; }
-      }
+      winners.forEach((r) => add(r.authorId, POINTS.favorite * m, 'loved'));
       this.favorite = { slots: winners.map((r) => r.slot), hearts: maxHearts };
     }
 
@@ -408,7 +549,7 @@ class Room {
     }
     this.phase = 'reveal';
     this.revealIdx = 0;
-    this.setTimer(this.settings.revealSeconds, () => this.advanceReveal());
+    this.setTimer(this.seconds('reveal'), () => this.advanceReveal());
   }
 
   advanceReveal() {
@@ -419,7 +560,7 @@ class Room {
       return;
     }
     this.revealIdx++;
-    this.setTimer(this.settings.revealSeconds, () => this.advanceReveal());
+    this.setTimer(this.seconds('reveal'), () => this.advanceReveal());
   }
 
   // ---------- views ----------
@@ -429,13 +570,13 @@ class Room {
   }
 
   leaderboard() {
-    return [...this.players.values()]
+    return this.active()
       .map((p) => ({ name: p.name, avatar: p.avatar, score: p.score, delta: p.score - p.lastScore }))
       .sort((a, b) => b.score - a.score);
   }
 
   awards() {
-    const all = [...this.players.values()];
+    const all = this.active();
     const best = (key) => {
       const max = Math.max(0, ...all.map((p) => p[key]));
       return max > 0 ? { names: all.filter((p) => p[key] === max).map((p) => p.name), value: max } : null;
@@ -451,13 +592,12 @@ class Room {
       return {
         slot: r.slot,
         author: this.name(r.authorId),
-        word: r.word,
+        words: r.words.map((w) => ({ word: w.word, catchers: w.catchers.map((id) => this.name(id)), fooled: w.fooled })),
         text: e.text,
         tokens: e.tokens,
         pins,
-        catchers: r.catchers.map((id) => this.name(id)),
-        fooled: r.fooled.length,
         decoy: r.decoy,
+        wanted: r.wanted,
         hearts: r.hearts,
       };
     });
@@ -478,14 +618,22 @@ class Room {
       phase: this.phase,
       round: this.round,
       totalRounds: this.settings.rounds,
+      settings: this.settings,
+      packs: Object.fromEntries(Object.entries(PACKS).map(([k, p]) => [k, p.name])),
+      roundChoices: ROUND_CHOICES,
+      finale: this.phase !== 'lobby' && this.isFinale(),
+      finaleNext: this.phase === 'scores' && this.isFinale(this.round + 1),
+      multiplier: this.multiplier,
       prompt: this.prompt,
-      deadline: this.deadline,
-      duration: this.duration,
+      deadline: this.paused ? null : this.deadline,
+      duration: this.paused ? this.paused.duration : this.duration,
+      paused: !!this.paused,
       now: Date.now(),
       canStart: this.canStart(),
       points: POINTS,
       limits: { min: MIN_ANSWER, max: MAX_ANSWER, minPlayers: MIN_PLAYERS, maxPlayers: MAX_PLAYERS },
-      players: [...this.players.values()].map((p) => {
+      wanted: [...this.wanted].map((id) => this.name(id)),
+      players: this.active().map((p) => {
         let done;
         if (this.phase === 'write') done = !!this.entries.get(p.id)?.text;
         if (this.phase === 'hunt') {
@@ -498,7 +646,7 @@ class Room {
     if (this.phase === 'hunt' || this.phase === 'reveal') {
       v.answers = this.order.map((id) => {
         const e = this.entries.get(id);
-        return { slot: e.slot, tokens: e.tokens };
+        return { slot: e.slot, tokens: e.tokens, picks: e.words.length, wanted: this.wanted.has(id) };
       });
     }
     if (this.phase === 'hunt') v.progress = this.huntProgress();
@@ -520,36 +668,43 @@ class Room {
 
   playerView(playerId) {
     const p = this.players.get(playerId);
-    if (!p) return null;
+    if (!p || p.kicked) return null;
     const v = this.baseView();
-    v.me = { id: p.id, name: p.name, score: p.score, vip: p.id === this.vipId, rerolls: p.rerolls, avatar: p.avatar };
+    v.me = {
+      id: p.id, name: p.name, score: p.score, vip: p.id === this.vipId, rerolls: p.rerolls, avatar: p.avatar,
+      wanted: this.wanted.has(p.id),
+    };
     const e = this.entries.get(p.id);
     if (e && this.phase !== 'lobby') {
-      v.mine = { word: e.word, text: e.text, slot: e.slot };
+      v.mine = { words: e.words, text: e.text, slot: e.slot };
     }
     if (this.phase === 'hunt') {
       v.myGuesses = this.guesses.get(p.id) || {};
       v.myHeart = this.hearts.get(p.id) || null;
     }
     if ((this.phase === 'reveal' || this.phase === 'scores') && this.results) {
-      const guesses = this.guesses.get(p.id) || {};
       const own = this.results.find((r) => r.authorId === p.id);
       v.myRound = {
         delta: p.score - p.lastScore,
-        caught: this.results.filter((r) => r.catchers.includes(p.id)).map((r) => ({ author: this.name(r.authorId), word: r.word })),
-        missed: this.results
-          .filter((r) => r.authorId !== p.id && !r.catchers.includes(p.id))
-          .map((r) => ({ author: this.name(r.authorId), word: r.word, guessed: guesses[r.slot] !== undefined })),
+        caught: [],
+        missed: [],
         mine: own
           ? {
-              fooled: own.fooled.length,
-              caughtBy: own.catchers.map((id) => this.name(id)),
+              caughtBy: [...new Set(own.words.flatMap((w) => w.catchers))].map((id) => this.name(id)),
+              fooled: own.words.reduce((n, w) => n + w.fooled, 0),
               decoy: own.decoy,
               hearts: own.hearts,
               favorite: !!this.favorite?.slots.includes(own.slot),
             }
           : null,
       };
+      for (const r of this.results) {
+        if (r.authorId === p.id) continue;
+        for (const w of r.words) {
+          const item = { author: this.name(r.authorId), word: w.word, wanted: r.wanted };
+          (w.catchers.includes(p.id) ? v.myRound.caught : v.myRound.missed).push(item);
+        }
+      }
     }
     return v;
   }
