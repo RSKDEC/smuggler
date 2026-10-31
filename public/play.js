@@ -97,7 +97,7 @@ function renderJoin(msg = '') {
   const s = loadSession();
   const room = (params.get('room') || (s && s.code) || '').toUpperCase();
   app.innerHTML = `
-    <h1 class="logo">Smug<span class="x">g</span>ler</h1>
+    <div class="join-head"><img src="/icon.svg" alt="" width="56" height="56"><h1 class="logo">Smug<span class="x">g</span>ler</h1></div>
     <form class="panel" id="join">
       <label>Room code<input id="code" maxlength="4" autocapitalize="characters" autocomplete="off" value="${esc(room)}" placeholder="ABCD"></label>
       <label>Your name<input id="name" maxlength="14" autocomplete="nickname" value="${esc((s && s.name) || '')}" placeholder="Name"></label>

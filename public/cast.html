@@ -3,7 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15110e">
   <title>Smuggler · Chromecast</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="apple-mobile-web-app-title" content="Smuggler">
   <link rel="stylesheet" href="/style.css">
   <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script>window.SMUGGLER_CAST = true;</script>
@@ -11,6 +17,7 @@
 <body>
   <div id="app" class="tv">
     <div class="cast-splash">
+      <img class="hero-icon" src="/icon.svg" alt="">
       <div class="logo">Smug<span class="x">g</span>ler</div>
       <p class="muted">Connecting to your phone…</p>
     </div>

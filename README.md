@@ -85,6 +85,7 @@ public/avatar.js   Suitcase characters (SVG)
 public/sound.js    Synthesized sound effects and music
 public/cast.js     Chromecast sender (phone's Cast button)
 public/cast.html   Chromecast receiver page (+ cast-receiver.js)
+public/icon.svg    App icon (source); PNG sizes in public/icons via scripts/make-icons.js
 test/smoke.js      End-to-end test
 ```
 
