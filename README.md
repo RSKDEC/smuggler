@@ -57,6 +57,20 @@ To play: on an **Android phone using Chrome** (or Chrome on a laptop), on the sa
 
 How it works: `public/cast.js` is the phone side (Cast Web Sender) and `public/cast.html` + `cast-receiver.js` run on the Chromecast (Cast Web Receiver). They exchange the room code over the `urn:x-cast:com.smuggler.game` channel. Opening `/cast` in a normal browser acts like `/host`, which is handy for testing.
 
+## Android TV app (Chromecast with Google TV)
+
+`android-tv/` is a small Android TV app that opens the TV screen (`/tv`) full-screen, with its own tile in the Google TV Apps row. GitHub Actions builds it on every change under `android-tv/` and publishes the APK to the game server at **`/app`** (`/smuggler-tv.apk`).
+
+Install it once on the Chromecast (sideloading, free):
+
+1. **Settings → System → About**, then click **Android TV OS build** 7 times until it says you're a developer.
+2. Install **Downloader** (by AFTVnews) from the Play Store.
+3. **Settings → Apps → Security & restrictions → Unknown sources**, then turn on **Downloader**.
+4. Open Downloader, enter `smuggler.onrender.com/app`, and choose **Install**.
+5. Open **Smuggler** from your Apps. Players join on their phones, and the VIP's phone runs the game.
+
+To update, repeat step 4; it installs over the old version. The app is signed with a sideload-only key committed in the repo. Publishing to the Play Store would need a new private key.
+
 ## Run it
 
 ```bash
@@ -86,6 +100,8 @@ public/sound.js    Synthesized sound effects and music
 public/cast.js     Chromecast sender (phone's Cast button)
 public/cast.html   Chromecast receiver page (+ cast-receiver.js)
 public/icon.svg    App icon (source); PNG sizes in public/icons via scripts/make-icons.js
+public/tv.html     TV screen for the Android TV app (no buttons, sound on)
+android-tv/        Android TV app (WebView wrapper), built by .github/workflows/android-tv.yml
 test/smoke.js      End-to-end test
 ```
 

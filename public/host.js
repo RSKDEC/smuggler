@@ -16,8 +16,10 @@ const joinUrl = (code) => `${location.origin}/play?room=${code}`;
 
 // On a Chromecast (cast.html) the TV waits for a phone to say which room to show.
 const CAST = !!window.SMUGGLER_CAST;
+// In the Android TV app (tv.html) there's only a remote: no buttons, the VIP's phone runs the game.
+const TV_APP = !!window.SMUGGLER_TV;
 let castCode;
-if (CAST) document.body.classList.add('cast');
+if (CAST || TV_APP) document.body.classList.add('cast');
 
 function onRoom(res) {
   save(res.code);
@@ -48,8 +50,8 @@ window.smugglerShow = (code) => {
   if (socket.connected) connectRoom();
 };
 
-// Chromecasts allow audio without a click.
-if (CAST) setTimeout(() => { if (sound.unlock()) setTimeout(() => { syncMusic(); render(); }, 300); }, 0);
+// Chromecasts and the TV app allow audio without a click.
+if (CAST || TV_APP) setTimeout(() => { if (sound.unlock()) setTimeout(() => { syncMusic(); render(); }, 300); }, 0);
 
 socket.on('host:state', (s) => {
   const prev = state;
@@ -69,10 +71,12 @@ function newRoom() {
   socket.emit('host:create', null, onRoom);
 }
 
-// Any click on the TV page unlocks audio (browsers require a gesture).
-document.addEventListener('click', () => {
+// Any click (or remote button press) unlocks audio; browsers require a gesture.
+const unlockSound = () => {
   if (!sound.ready() && sound.unlock()) setTimeout(() => { syncMusic(); render(); }, 50);
-});
+};
+document.addEventListener('click', unlockSound);
+document.addEventListener('keydown', unlockSound);
 
 app.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-act]');

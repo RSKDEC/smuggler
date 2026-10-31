@@ -1,2 +1,8 @@
 node_modules/
 .DS_Store
+
+# Android build output
+android-tv/.gradle/
+android-tv/build/
+android-tv/app/build/
+android-tv/local.properties

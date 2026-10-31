@@ -1,0 +1,52 @@
+# Builds the Android TV app and publishes the APK to the game server at
+# /smuggler-tv.apk (short link: /app), so a Chromecast with Google TV can
+# download it with an app like "Downloader".
+name: Android TV app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android-tv/**'
+      - '.github/workflows/android-tv.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build APK
+        working-directory: android-tv
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smuggler-tv
+          path: android-tv/app/build/outputs/apk/release/app-release.apk
+
+      # Pushes made with the workflow token don't trigger workflows, so this can't loop.
+      - name: Publish APK to the game server
+        run: |
+          cp android-tv/app/build/outputs/apk/release/app-release.apk public/smuggler-tv.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/smuggler-tv.apk
+          git commit -m "Build Smuggler TV app (run ${{ github.run_number }})" || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main

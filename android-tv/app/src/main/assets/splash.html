@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin: 0; height: 100%; }
+    body {
+      display: grid; place-content: center; text-align: center; gap: 3vh;
+      font-family: sans-serif; color: #f7efe3;
+      background: repeating-linear-gradient(135deg, rgba(255,183,3,.035) 0 22px, transparent 22px 44px), #15110e;
+    }
+    img { width: 16vw; height: 16vw; margin: 0 auto; border-radius: 3.6vw; box-shadow: 0 2vh 4vh rgba(0,0,0,.5); animation: bob 2.4s ease-in-out infinite; }
+    h1 { margin: 0; font-size: 6vw; letter-spacing: .4vw; color: #ffb703; }
+    h1 span { color: #e63946; }
+    p { margin: 0; font-size: 2vw; color: #b5a491; animation: pulse 1.6s infinite; }
+    @keyframes bob { 50% { transform: translateY(-4%) rotate(2deg); } }
+    @keyframes pulse { 50% { opacity: .5; } }
+  </style>
+</head>
+<body>
+  <img src="icon.png" alt="">
+  <h1>SMUG<span>G</span>LER</h1>
+  <p id="msg">Waking up the game server…</p>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const url = q.get('url');
+    if (q.get('error')) {
+      document.getElementById('msg').textContent = "Can't reach the game server. Retrying…";
+      setTimeout(() => location.replace(url), 5000);
+    } else {
+      // The free server can take up to a minute to wake; this screen stays until it answers.
+      location.replace(url);
+    }
+  </script>
+</body>
+</html>
