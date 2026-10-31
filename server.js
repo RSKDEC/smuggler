@@ -19,10 +19,12 @@ app.get('/host', (req, res) => res.sendFile(path.join(pub, 'host.html')));
 app.get('/play', (req, res) => res.sendFile(path.join(pub, 'play.html')));
 // Chromecast Web Receiver (register https://<host>/cast in the Google Cast console).
 app.get('/cast', (req, res) => res.sendFile(path.join(pub, 'cast.html')));
-// Runtime config for the phones: the Cast App ID comes from the CAST_APP_ID env var.
+// Runtime config for the phones. The Cast App ID is public (every sender sees it);
+// CAST_APP_ID overrides the registered default, e.g. for a second deployment.
+const CAST_APP_ID = process.env.CAST_APP_ID ?? '71725E91';
 app.get('/config.js', (req, res) => {
   res.type('application/javascript').set('Cache-Control', 'no-store');
-  res.send(`window.SMUGGLER_CONFIG = ${JSON.stringify({ castAppId: process.env.CAST_APP_ID || '' })};`);
+  res.send(`window.SMUGGLER_CONFIG = ${JSON.stringify({ castAppId: CAST_APP_ID })};`);
 });
 
 const rooms = new Map();

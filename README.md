@@ -51,7 +51,7 @@ One-time setup:
 
 1. In the [Google Cast SDK Developer Console](https://cast.google.com/publish) (one-time $5 fee), choose **Add new application → Custom Receiver**. Set the receiver URL to `https://<your-app>.onrender.com/cast`, then copy the **Application ID** it gives you.
 2. In the same console, choose **Add new device** and enter your Chromecast's serial number. Unpublished apps only run on registered devices. Registration can take about 15 minutes, and then you restart the Chromecast.
-3. In Render, open the service → **Environment** → add `CAST_APP_ID` = your Application ID. Render redeploys automatically.
+3. Put the Application ID in `server.js` (the default is `71725E91`, registered for smuggler.onrender.com), or set the `CAST_APP_ID` environment variable in Render to override it.
 
 To play: on an **Android phone using Chrome** (or Chrome on a laptop), on the same Wi-Fi as the Chromecast, open `/play` and tap **📺 Cast a new game to your TV**. The TV shows the room code, and everyone joins as usual; iPhones can join, they just can't start the cast. A player already in a game can tap **📺 Cast** in the top bar to move that game onto the TV.
 
